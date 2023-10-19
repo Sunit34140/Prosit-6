@@ -1,0 +1,326 @@
+#include <Adafruit_BME280.h>
+#include <ChainableLED.h>
+#include <Wire.h>
+#include "RTClib.h"
+#include <SPI.h>
+#include <SD.h>
+
+#define boutonVert 6
+#define boutonRouge 7
+#define NUM_LEDS 1
+#define capteurLuminosite A0
+
+ChainableLED ledRGB(8,9, NUM_LEDS);
+
+Adafruit_BME280 bme;
+
+const int chipSelect = 4;
+
+float valCapteurHumidite;
+float valCapteurTemperature;
+float valCapteurPressionAtmospherique;
+int valCapteurLuminosite;
+
+bool gpsActif = true;
+
+
+RTC_DS1307 rtc;
+word DateHeure[7] = {0, 0, 0, 0, 0, 0, 0};
+char JoursSem[7][12] = {"Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"};
+
+bool possibiliteModeConfiguration = true;
+bool modeStandardActif = true;
+bool modeEconomiqueActif = false;
+
+
+unsigned long debutTemps;
+unsigned long debutTemps5s;
+int tempsAttente = 1000*60*10;
+
+void setup() {
+  Serial.begin(9600);
+  ledRGB.init();
+  while (!rtc.begin()){
+    ledRouge();
+    delay(1000);
+    ledBleue();
+    delay(1000);
+  }
+  ledOFF();
+  rtc.writeSqwPinMode(DS1307_SquareWave4kHz);
+  rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+  if (!bme.begin(0x76)) {
+    Serial.println("Impossible de trouver un capteur BME280, vérifiez le câblage !");
+    while (1);
+  }
+  Serial.print("Initializing SD card...");
+  if (!SD.begin(chipSelect)) {
+    Serial.println("Card failed, or not present");
+    while (1);
+  }
+  pinMode(boutonRouge, INPUT_PULLUP);
+  pinMode(boutonVert, INPUT_PULLUP);
+}
+
+void ledOFF(){
+  ledRGB.setColorRGB(0, 0, 0, 0);
+}
+
+void ledVerte(){
+  ledRGB.setColorRGB(0, 0, 255, 0);
+}
+
+void ledJaune(){
+  ledRGB.setColorRGB(0, 255, 255, 0);
+}
+
+void ledRouge(){
+  ledRGB.setColorRGB(0, 255, 0, 0);
+}
+
+void ledBleue(){
+  ledRGB.setColorRGB(0, 0, 0, 255);
+}
+
+void ledOrange(){
+  ledRGB.setColorRGB(0, 255, 70, 0);
+}
+
+void ledBlanche(){
+  ledRGB.setColorRGB(0, 255, 255, 255);
+}
+
+
+
+void recupDateHeure(word *DateHeure){
+  DateTime now = rtc.now();
+  DateHeure[5] = now.year();
+  DateHeure[4] = now.month();
+  DateHeure[3] = now.day();
+  DateHeure[2] = now.hour();
+  DateHeure[1] = now.minute();
+  DateHeure[0] = now.second();
+  DateHeure[6] = now.dayOfTheWeek();
+}
+
+
+void recupCapteurHumidite(){
+  valCapteurHumidite = bme.readHumidity();
+}
+
+
+void recupCapteurTemperature(){
+  valCapteurTemperature = bme.readTemperature();
+}
+
+
+void recupCapteurPressionAtmospherique(){
+  valCapteurPressionAtmospherique = bme.readPressure();
+}
+
+
+void recupCapteurLuminosite(){
+  valCapteurLuminosite = analogRead(capteurLuminosite);
+}
+
+
+void recupCapteurGPS(){
+  
+}
+
+
+void sauvegarderDonnees(){
+  recupDateHeure(DateHeure);
+  Serial.print(DateHeure[3], DEC);
+  Serial.print('/');
+  Serial.print(DateHeure[4], DEC);
+  Serial.print('/');
+  Serial.print(DateHeure[5], DEC);
+  Serial.print(", ");
+  Serial.print(JoursSem[DateHeure[6]]);
+  Serial.print("  ");
+  Serial.print(DateHeure[2], DEC);
+  Serial.print(':');
+  Serial.print(DateHeure[1], DEC);
+  Serial.print(':');
+  Serial.print(DateHeure[0], DEC);
+  Serial.println();
+
+  Serial.print("Humidité : ");
+  Serial.print(valCapteurHumidite);
+  Serial.println(" %");
+
+  Serial.print("Température en degrés : ");
+  Serial.print(valCapteurTemperature);
+  Serial.println(" °C");
+
+  Serial.print("Pression Atmosphérique : ");
+  Serial.print(valCapteurPressionAtmospherique);
+  Serial.println(" Pa");
+
+  Serial.print("Luminosité : ");
+  Serial.print(valCapteurLuminosite);
+  Serial.println(" Lux");
+  if (modeEconomiqueActif==false || gpsActif){
+    
+  }
+  Serial.println('\n');
+  if (modeEconomiqueActif || modeStandardActif){
+    String datacsv = "";
+    datacsv+=String(DateHeure[3], DEC);
+    datacsv+="/";
+    datacsv+=String(DateHeure[4], DEC);
+    datacsv+="/";
+    datacsv+=String(DateHeure[5], DEC);
+    datacsv+=" ; ";
+    datacsv+=String(JoursSem[DateHeure[6]]);
+    datacsv+=" ; ";
+    datacsv+=String(DateHeure[2], DEC);
+    datacsv+=":";
+    datacsv+=String(DateHeure[1], DEC);
+    datacsv+=":";
+    datacsv+=String(DateHeure[0], DEC);
+    datacsv+=" ; ";
+    datacsv+=String(valCapteurHumidite);
+    datacsv+=" ; ";
+    datacsv+=String(valCapteurTemperature);
+    datacsv+=" ; ";
+    datacsv+=String(valCapteurPressionAtmospherique);
+    datacsv+=" ; ";
+    datacsv+=String(valCapteurLuminosite);
+    File dataFile = SD.open("donnees.csv", FILE_WRITE);
+    if (dataFile) {
+      dataFile.println(datacsv);
+    }
+    else {
+      Serial.println("Erreur dans l'ouverture de donnees.csv");
+    }
+    dataFile.close();
+  }
+}
+
+
+void modeStandard() {
+  recupCapteurHumidite();
+  recupCapteurTemperature();
+  recupCapteurPressionAtmospherique();
+  recupCapteurLuminosite();
+  recupCapteurGPS();
+  sauvegarderDonnees();
+}
+
+
+void modeEconomique() {
+  recupCapteurHumidite();
+  recupCapteurTemperature();
+  recupCapteurPressionAtmospherique();
+  recupCapteurLuminosite();
+  if (gpsActif){
+    recupCapteurGPS();
+    sauvegarderDonnees();
+    gpsActif = false;
+  }
+  else{
+    sauvegarderDonnees();
+    gpsActif = true;
+  }
+}
+
+
+void modeMaintenance() {
+  recupCapteurHumidite();
+  recupCapteurTemperature();
+  recupCapteurPressionAtmospherique();
+  recupCapteurLuminosite();
+  recupCapteurGPS();
+  sauvegarderDonnees();
+}
+
+
+void modeConfiguration() {
+  ledJaune();
+  debutTemps = millis();
+  while (millis()-debutTemps<5000){
+    if (digitalRead(boutonVert)==LOW){
+      debutTemps = millis();
+    }
+  }
+}
+
+
+
+void loop() {
+  /// Attente de 1s avant d'appuyé ou non sur le bouton rouge (uniquement lors de la première exécution du loop)
+  if (possibiliteModeConfiguration) {
+    delay(1000);
+  }
+  if (possibiliteModeConfiguration && digitalRead(boutonRouge)==LOW) {
+    /// Passage en mode configuration
+    modeConfiguration();
+  }
+  /// Empecher la possibilité de retourner en mode configuration après la première exécution du loop
+  if (possibiliteModeConfiguration){
+    ledVerte();
+    possibiliteModeConfiguration = false;
+  }
+
+  /// Réalisation des actions du mode actuel sélectionné
+  if (modeStandardActif) {
+    modeStandard();
+  }
+  else if (modeEconomiqueActif){
+    modeEconomique();
+  }
+  else{
+    modeMaintenance();
+  }
+  debutTemps = millis();
+  /// Début de l'attente entre 2 prises de données
+  while (millis()-debutTemps<tempsAttente){
+    /// Vérification et actions si le bouton vert est enfoncé 5s
+    if (digitalRead(boutonVert)==LOW){
+      debutTemps5s = millis();
+      while (millis()-debutTemps5s<5000 && digitalRead(boutonVert)==LOW){
+        continue;
+      }
+      if (millis()-debutTemps5s>=5000){
+        if (modeStandardActif){
+          /// Passage en mode économique (sortie de mode standard)
+          modeStandardActif = false;
+          modeEconomiqueActif = true;
+          tempsAttente*=2;
+          gpsActif = true;
+          ledBleue();
+        }
+      }
+    }
+    /// Vérification et actions si le bouton rouge est enfoncé 5s
+    if (digitalRead(boutonRouge)==LOW){
+      debutTemps5s = millis();
+      while (millis()-debutTemps5s<5000 && digitalRead(boutonRouge)==LOW){
+        continue;
+      }
+      if (millis()-debutTemps5s>=5000){
+        if (modeStandardActif){
+          /// Passage en mode maintenance (sortie de mode standard)
+          modeStandardActif = false;
+          ledOrange();
+        }
+        else if (modeEconomiqueActif){
+          /// Passage en mode standard (sortie de mode économique)
+          modeEconomiqueActif = false;
+          modeStandardActif = true;
+          tempsAttente/=2;
+          ledVerte();
+        }
+        else{
+          /// Passage en mode standard (sortie de mode maintenance)
+          modeStandardActif = true;
+          ledVerte();
+        }
+      }
+    }
+  }
+}
+
+
